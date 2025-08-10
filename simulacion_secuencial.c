@@ -2,13 +2,14 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdbool.h>
 
 // Estructuras de datos
 typedef struct {
     int id_v;
     int tipo; // 0=carro, 1=moto, 2=camion
     int state; // 0=en espera, 1=movimiento
-    char position[]; // idInterseccion_idSemaforo
+    char position[11]; // idInterseccion_idSemaforo
 } Vehicle;
 
 typedef struct {
@@ -58,7 +59,7 @@ Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_inter
     else if (vehicle.tipo == 2)
         tipo = "camion";
 
-    printf("\nEl %s %d está en la intersección %d", tipo, vehicle.id_v, inId);
+    printf("\nEl %s %d está en la intersección %d semáforo %d", tipo, vehicle.id_v, inId, sId);
     
     // obtener estado de semaforo
     int semaforo_state = intersecciones[inId].semaforos[sId].state;
@@ -73,7 +74,7 @@ Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_inter
 
             inId = (inId + 2) % total_intersecciones;
             sId = (sId + 1) % 2; 
-            printf(" y avanza a la intersección %d V\n", inId);
+            printf(" y avanza a la intersección %d V", inId);
             
             break;
 
@@ -84,11 +85,12 @@ Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_inter
 
             inId = (inId + 2) % total_intersecciones;
             sId = (sId + 1) % 2; 
-            printf(" y avanza a la intersección %d A\n", inId);
+            printf(" y avanza a la intersección %d A", inId);
             
             break;
 
         default: //rojos
+            printf(" en rojo");
             return vehicle;
     }
 
@@ -102,6 +104,9 @@ Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_inter
     return vehicle;
 }
 
+#define CUANTOS_VEHICULOS 40
+#define CUANTAS_INTERSECCIONES 5
+
 /**
  * Para efectos de la simulación asumimos que la intersección 1 es seguida por la 3, la 2 por la 4, y así sucesivamente.
  * Si hay N cantidad de intersecciones se pasa de la N a la 2 (formando un ciclo) y N-1 a 1
@@ -110,13 +115,10 @@ Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_inter
 int main() {
     srand(time(NULL)); // Semilla para valores aleatorios
 
-    int cuantos_vehiculos = 40;
-    int cuantas_intersecciones = 5;
-    int cuantos_semaforos = cuantas_intersecciones*2;
-    int max_intersección = cuantos_vehiculos/cuantas_intersecciones;
-
-    Vehicle vehiculos[cuantos_vehiculos];
-    Intersection intersecciones[cuantas_intersecciones];
+    int cuantos_semaforos = CUANTAS_INTERSECCIONES*2;
+    
+    Vehicle vehiculos[CUANTOS_VEHICULOS];
+    Intersection intersecciones[CUANTAS_INTERSECCIONES];
 
     // Inicializar semáforos
     int inter_creadas = 0;
@@ -144,19 +146,19 @@ int main() {
     }
 
     // Inicializar vehículos
-    for (int i = 0; i < cuantos_vehiculos; i++) {
+    for (int i = 0; i < CUANTOS_VEHICULOS; i++) {
         vehiculos[i].id_v = i;
         vehiculos[i].tipo = rand() % 3; // 0=carro, 1=moto, 2=camion
 
-        int inter_idx = (i * 2) % cuantas_intersecciones;
+        int inter_idx = (inter_idx + 1) % CUANTAS_INTERSECCIONES;
         int semaf_idx = (i * 2) % 2; // índice dentro de la intersección (0 o 1)
 
         // Guardar posición como "interseccionID_semaforoID"
         sprintf(
             vehiculos[i].position,
             "%d_%d",
-            intersecciones[inter_idx].id_i,
-            intersecciones[inter_idx].semaforos[semaf_idx].id_s
+            inter_idx,
+            semaf_idx
         );
 
         // Estado del vehículo según el semáforo asignado
@@ -166,13 +168,13 @@ int main() {
 
     // Mostrar datos
     printf("Vehículos:\n");
-    for (int i = 0; i < cuantos_vehiculos; i++) {
+    for (int i = 0; i < CUANTOS_VEHICULOS; i++) {
         printf("ID:%d Tipo:%d Estado:%d\n", vehiculos[i].id_v, vehiculos[i].tipo, vehiculos[i].state);
         printf("\tPosicion:%s\n", vehiculos[i].position);
     }
 
     printf("\nIntersecciones:\n");
-    for (int i = 0; i < cuantas_intersecciones; i++) {
+    for (int i = 0; i < CUANTAS_INTERSECCIONES; i++) {
         printf("Interseccion %d: S1(ID:%d, Estado:%d) S2(ID:%d, Estado:%d)\n",
                intersecciones[i].id_i,
                intersecciones[i].semaforos[0].id_s, intersecciones[i].semaforos[0].state,
@@ -180,15 +182,15 @@ int main() {
     }
 
     // Cambios de estado en semaforos ## Añadir paralelizacion
-    // for (int i = 0; i < cuantas_intersecciones; i++){
-    //     printf("\ninterseccion %d\n", i);
-    //     semaphore_logic(intersecciones[i].semaforos);
-    // }
+    for (int i = 0; i < CUANTAS_INTERSECCIONES; i++){
+        printf("\ninterseccion %d\n", i);
+        semaphore_logic(intersecciones[i].semaforos);
+    }
 
     // Movimiento de vehículos ## Añadir paralelizacion
-    for (int i = 0; i < cuantos_vehiculos; i++){
-        printf("\nvehiculo %d\n", i);
-        vehiculos[i] = movement(vehiculos[i], intersecciones, cuantas_intersecciones);
-    }
+    for (int i = 0; i < CUANTOS_VEHICULOS; i++){
+        vehiculos[i] = movement(vehiculos[i], intersecciones, CUANTAS_INTERSECCIONES);
+        printf("\n");}
+    
     return 0;
 }

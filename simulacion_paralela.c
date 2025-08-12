@@ -10,7 +10,8 @@ typedef struct {
     int id_v;
     int tipo; // 0=carro, 1=moto, 2=camion
     int state; // 0=en espera, 1=movimiento
-    char position[11]; // idInterseccion_idSemaforo
+    int inId; // posición directa
+    int sId;
 } Vehicle;
 
 typedef struct {
@@ -29,83 +30,71 @@ void update_semaphore(Semaphore semaforos[]) {
         switch (semaforos[0].state) {
             case 0: // rojo → verde
                 semaforos[0].state = 2;
-                semaforos[0].timer = 5;
+                semaforos[0].timer = 2;
                 semaforos[1].state = 0;
-                semaforos[1].timer = 8;
+                semaforos[1].timer = 3;
                 break;
             case 1: // amarillo → rojo
                 semaforos[0].state = 0;
-                semaforos[0].timer = 8;
+                semaforos[0].timer = 3;
                 semaforos[1].state = 2;
-                semaforos[1].timer = 5;
+                semaforos[1].timer = 2;
                 break;
             case 2: // verde → amarillo
                 semaforos[0].state = 1;
-                semaforos[0].timer = 3;
+                semaforos[0].timer = 1;
                 break;
         }
     }
 }
 
-Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_intersecciones){
-    int inId, sId;
-    sscanf(vehicle.position, "%d_%d", &inId, &sId);
+Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_intersecciones, unsigned int *seed){
+    int inId = vehicle.inId;
+    int sId = vehicle.sId;
 
     const char* tipo;
     if (vehicle.tipo == 0)
         tipo = "carro";
     else if (vehicle.tipo == 1)
         tipo = "moto";
-    else if (vehicle.tipo == 2)
+    else
         tipo = "camion";
 
-    printf("\nEl %s %d está en el semáforo %d", tipo, vehicle.id_v, sId);
-    
-    // obtener estado de semaforo
+    // Usa rand_r para uso paralelo seguro
+    int r = rand_r(seed) % 100; 
+
     int semaforo_state = intersecciones[inId].semaforos[sId].state;
-    // genera número entre 0 y 99
-    int r = rand() % 100; 
 
     switch (semaforo_state){
         case 2: //verde
-            // simular probabilidad de avanzar a siguiente interseccion
-            if (r >= 70)  // 70% de probabilidad 
+            if (r >= 70)
                 return vehicle;
 
             inId = (inId + sId + 1) % total_intersecciones;
-            sId = (sId + 1) % 2;  // índice dentro de la intersección (0 o 1)
-            printf(" (en verde) y avanza a la intersección %d", inId);
-            
+            sId = (sId + 1) % 2;
             break;
 
         case 1: //amarillo
-            // simular probabilidad de avanzar a siguiente interseccion
-            if (r >= 30) // 30% de probabilidad
+            if (r >= 30)
                 return vehicle;
 
             inId = (inId + sId + 1) % total_intersecciones;
-            sId = (sId + 1) % 2;  // índice dentro de la intersección (0 o 1)
-            printf(" (en amarillo) y avanza a la intersección %d", inId);
-            
+            sId = (sId + 1) % 2;
             break;
 
-        default: //rojos
-            printf(" en rojo");
+        default: //rojo
             return vehicle;
     }
 
-    // Guardar nueva posicion
-    sprintf(
-            vehicle.position,
-            "%d_%d",
-            intersecciones[inId].id_i,
-            intersecciones[inId].semaforos[sId].id_s
-        );
+    vehicle.inId = inId;
+    vehicle.sId = sId;
+
     return vehicle;
 }
 
 #define CUANTOS_VEHICULOS 40
 #define CUANTAS_INTERSECCIONES 5
+
 
 /*
     Lógica general del ciclo, cambian semáforos y los vehículos afectados se mueven
@@ -114,21 +103,73 @@ int action(Intersection intersecciones[], Vehicle vehiculos[]) {
     int hilos = omp_get_max_threads();
     omp_set_num_threads(hilos);
 
-    // Paralelizar por intersección
-    #pragma omp parallel for schedule(dynamic)
-    for (int i = 0; i < CUANTAS_INTERSECCIONES; i++) {
-        printf("\n\nIntersección %d (Hilo %d)\n", i, omp_get_thread_num());
-        update_semaphore(intersecciones[i].semaforos);
-        
-        // Paralelismo anidado por vehículo
-        #pragma omp parallel for schedule(auto)
-        for (int j = 0; j < CUANTOS_VEHICULOS; j++) {
-            int inId, sId;
-            sscanf(vehiculos[j].position, "%d_%d", &inId, &sId);
+    // Buffers para estados de semáforos (antes y después)
+    typedef struct {
+        int before0, before1;
+        int after0, after1;
+    } SemStateLog;
 
-            if (inId == intersecciones[i].id_i) {
-                vehiculos[j] = movement(vehiculos[j], intersecciones, CUANTAS_INTERSECCIONES);
-            }
+    SemStateLog sem_logs[CUANTAS_INTERSECCIONES];
+
+    // Guardar estados antes
+    for (int i = 0; i < CUANTAS_INTERSECCIONES; i++) {
+        sem_logs[i].before0 = intersecciones[i].semaforos[0].state;
+        sem_logs[i].before1 = intersecciones[i].semaforos[1].state;
+    }
+
+    // Actualizar semáforos (paralelo)
+    #pragma omp parallel for schedule(static)
+    for (int i = 0; i < CUANTAS_INTERSECCIONES; i++) {
+        update_semaphore(intersecciones[i].semaforos);
+    }
+
+    // Guardar estados después
+    for (int i = 0; i < CUANTAS_INTERSECCIONES; i++) {
+        sem_logs[i].after0 = intersecciones[i].semaforos[0].state;
+        sem_logs[i].after1 = intersecciones[i].semaforos[1].state;
+    }
+
+    // Buffer de logs por vehículo
+    char log_buffer[CUANTOS_VEHICULOS][100] = {{0}};
+
+    // Mover vehículos y guardar logs en buffer
+    #pragma omp parallel for schedule(dynamic)
+    for (int j = 0; j < CUANTOS_VEHICULOS; j++) {
+        if (vehiculos[j].state == 1) {
+            Vehicle v_old = vehiculos[j];
+            
+            unsigned int seed = time(NULL) ^ omp_get_thread_num() ^ j;
+            vehiculos[j] = movement(vehiculos[j], intersecciones, CUANTAS_INTERSECCIONES, &seed);
+
+            // Ejemplo de guardar log (puedes personalizar)
+            const char* tipo_str = (vehiculos[j].tipo == 0) ? "carro" :
+                                  (vehiculos[j].tipo == 1) ? "moto" : "camion";
+
+            snprintf(log_buffer[j], 100, 
+                "Vehículo %d (%s) pasó de %d_%d a %d_%d\n", 
+                vehiculos[j].id_v, tipo_str,
+                v_old.inId, v_old.sId, 
+                vehiculos[j].inId, vehiculos[j].sId);
+        }
+    }
+
+    // Imprimir logs secuencialmente
+    // Estados de semáforos
+    for (int i = 0; i < CUANTAS_INTERSECCIONES; i++) {
+        if (sem_logs[i].before0 != sem_logs[i].after0) {
+            printf("Intersección %d, Semáforo 0 cambió de %d a %d\n",
+                i, sem_logs[i].before0, sem_logs[i].after0);
+        }
+        if (sem_logs[i].before1 != sem_logs[i].after1) {
+            printf("Intersección %d, Semáforo 1 cambió de %d a %d\n",
+                i, sem_logs[i].before1, sem_logs[i].after1);
+        }
+    }
+
+    // Movimiento de vehículos
+    for (int j = 0; j < CUANTOS_VEHICULOS; j++) {
+        if (log_buffer[j][0] != '\0') {
+            printf("%s", log_buffer[j]);
         }
     }
 
@@ -150,46 +191,40 @@ int main() {
     Intersection intersecciones[CUANTAS_INTERSECCIONES];
 
     // Inicializar semáforos
-    int inter_creadas = 0;
+    #pragma omp parallel for
     for (int i = 0; i < cuantos_semaforos; i++) {
         Semaphore tempS;
         tempS.id_s = i;
         tempS.timer = 0;
 
-        if (i % 2 == 0) { // índice par → primer semáforo de la intersección
+        int inter_creadas_local = i / 2; // índice intersección según i
+
+        if (i % 2 == 0) {
             tempS.state = rand() % 3; // 0=rojo,1=amarillo,2=verde
-            intersecciones[inter_creadas].id_i = inter_creadas; // ID de intersección = contador
-            intersecciones[inter_creadas].semaforos[0] = tempS;
-        } else { // índice impar → segundo semáforo
-            // Definir estado congruente según el primero
-            int estado_primero = intersecciones[inter_creadas].semaforos[0].state;
-            if (estado_primero == 2) {          // primero verde → segundo rojo
+            intersecciones[inter_creadas_local].id_i = inter_creadas_local;
+            intersecciones[inter_creadas_local].semaforos[0] = tempS;
+        } else {
+            int estado_primero = intersecciones[inter_creadas_local].semaforos[0].state;
+            if (estado_primero == 2 || estado_primero == 1)
                 tempS.state = 0;
-            } else if (estado_primero == 1) {   // primero amarillo → segundo rojo
-                tempS.state = 0;
-            } else {                            // primero rojo → segundo verde o amarillo
-                tempS.state = (rand() % 2) + 1; // 1 o 2
-            }
-            intersecciones[inter_creadas].semaforos[1] = tempS;
-            inter_creadas++; // cerrar esta intersección
+            else
+                tempS.state = (rand() % 2) + 1;
+            intersecciones[inter_creadas_local].semaforos[1] = tempS;
         }
     }
 
     // Inicializar vehículos
+    #pragma omp parallel for
     for (int i = 0; i < CUANTOS_VEHICULOS; i++) {
         vehiculos[i].id_v = i;
         vehiculos[i].tipo = rand() % 3; // 0=carro, 1=moto, 2=camion
 
-        int inter_idx = (inter_idx + 1) % CUANTAS_INTERSECCIONES;
+        int inter_idx = i % CUANTAS_INTERSECCIONES;
         int semaf_idx = rand() % 2; // índice dentro de la intersección (0 o 1)
 
-        // Guardar posición como "interseccionID_semaforoID"
-        sprintf(
-            vehiculos[i].position,
-            "%d_%d",
-            inter_idx,
-            semaf_idx
-        );
+        // Guardar posición 
+        vehiculos[i].inId = inter_idx;
+        vehiculos[i].sId = semaf_idx;
 
         // Estado del vehículo según el semáforo asignado
         int semaforo_state = intersecciones[inter_idx].semaforos[semaf_idx].state;

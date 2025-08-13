@@ -9,7 +9,8 @@ typedef struct {
     int id_v;
     int tipo; // 0=carro, 1=moto, 2=camion
     int state; // 0=en espera, 1=movimiento
-    char position[11]; // idInterseccion_idSemaforo
+    int inId; // posición directa
+    int sId;
 } Vehicle;
 
 typedef struct {
@@ -47,8 +48,8 @@ void update_semaphore(Semaphore semaforos[]) {
 }
 
 Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_intersecciones){
-    int inId, sId;
-    sscanf(vehicle.position, "%d_%d", &inId, &sId);
+    int inId = vehicle.inId;
+    int sId = vehicle.sId;
 
     const char* tipo;
     if (vehicle.tipo == 0)
@@ -94,12 +95,8 @@ Vehicle movement(Vehicle vehicle, Intersection intersecciones[], int total_inter
     }
 
     // Guardar nueva posicion
-    sprintf(
-            vehicle.position,
-            "%d_%d",
-            intersecciones[inId].id_i,
-            intersecciones[inId].semaforos[sId].id_s
-        );
+    vehicle.inId = inId;
+    vehicle.sId = sId;
     return vehicle;
 }
 
@@ -116,8 +113,7 @@ int action(Intersection intersecciones[], Vehicle vehiculos[]){
         printf("\n\ninterseccion %d\n", i);
         update_semaphore(intersecciones[i].semaforos);
         for (int j = 0; j < CUANTOS_VEHICULOS; j++) {
-            int inId, sId;
-            sscanf(vehiculos[j].position, "%d_%d", &inId, &sId);
+            int inId = vehiculos[j].inId;
 
             if (inId == intersecciones[i].id_i) {
                 vehiculos[j] = movement(vehiculos[j], intersecciones, CUANTAS_INTERSECCIONES);
@@ -174,16 +170,12 @@ int main() {
         vehiculos[i].id_v = i;
         vehiculos[i].tipo = rand() % 3; // 0=carro, 1=moto, 2=camion
 
-        int inter_idx = (inter_idx + 1) % CUANTAS_INTERSECCIONES;
+        int inter_idx = rand() % CUANTAS_INTERSECCIONES;
         int semaf_idx = rand() % 2; // índice dentro de la intersección (0 o 1)
 
-        // Guardar posición como "interseccionID_semaforoID"
-        sprintf(
-            vehiculos[i].position,
-            "%d_%d",
-            inter_idx,
-            semaf_idx
-        );
+        // Guardar posición 
+        vehiculos[i].inId = inter_idx;
+        vehiculos[i].sId = semaf_idx;
 
         // Estado del vehículo según el semáforo asignado
         int semaforo_state = intersecciones[inter_idx].semaforos[semaf_idx].state;

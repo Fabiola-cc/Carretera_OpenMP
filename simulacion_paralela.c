@@ -27,22 +27,24 @@ typedef struct {
 
 void update_semaphore(Semaphore semaforos[]) {
     if (--semaforos[0].timer <= 0) {
+        --semaforos[1].timer;
         switch (semaforos[0].state) {
-            case 0: // rojo → verde
-                semaforos[0].state = 2;
+            case 0:
+                semaforos[0].state = 2; // rojo → verde
                 semaforos[0].timer = 2;
-                semaforos[1].state = 0;
+                semaforos[1].state = 0; // amarillo → rojo
                 semaforos[1].timer = 3;
                 break;
-            case 1: // amarillo → rojo
-                semaforos[0].state = 0;
+            case 1:
+                semaforos[0].state = 0; // amarillo → rojo
                 semaforos[0].timer = 3;
-                semaforos[1].state = 2;
+                semaforos[1].state = 2; // rojo → verde
                 semaforos[1].timer = 2;
                 break;
-            case 2: // verde → amarillo
-                semaforos[0].state = 1;
+            case 2: 
+                semaforos[0].state = 1; // verde → amarillo
                 semaforos[0].timer = 1;
+                semaforos[1].state = 0; // permanece en rojo
                 break;
         }
     }
@@ -155,14 +157,15 @@ int action(Intersection intersecciones[], Vehicle vehiculos[]) {
 
     // Imprimir logs secuencialmente
     // Estados de semáforos
+    const char *color_str[] = {"rojo", "amarillo", "verde"};
     for (int i = 0; i < CUANTAS_INTERSECCIONES; i++) {
         if (sem_logs[i].before0 != sem_logs[i].after0) {
-            printf("Intersección %d, Semáforo 0 cambió de %d a %d\n",
-                i, sem_logs[i].before0, sem_logs[i].after0);
+            printf("Intersección %d, Semáforo 0 cambió de %s a %s\n",
+                i, color_str[sem_logs[i].before0], color_str[sem_logs[i].after0]);
         }
         if (sem_logs[i].before1 != sem_logs[i].after1) {
-            printf("Intersección %d, Semáforo 1 cambió de %d a %d\n",
-                i, sem_logs[i].before1, sem_logs[i].after1);
+            printf("Intersección %d, Semáforo 1 cambió de %s a %s\n",
+                i, color_str[sem_logs[i].before1], color_str[sem_logs[i].after1]);
         }
     }
 
@@ -192,25 +195,18 @@ int main() {
 
     // Inicializar semáforos
     #pragma omp parallel for
-    for (int i = 0; i < cuantos_semaforos; i++) {
-        Semaphore tempS;
-        tempS.id_s = i;
-        tempS.timer = 0;
+    for (int idx = 0; idx < CUANTAS_INTERSECCIONES; idx++) {
+        Semaphore s0 = {.id_s = idx * 2, .timer = 0};
+        s0.state = rand() % 3;
+        intersecciones[idx].id_i = idx;
+        intersecciones[idx].semaforos[0] = s0;
 
-        int inter_creadas_local = i / 2; // índice intersección según i
-
-        if (i % 2 == 0) {
-            tempS.state = rand() % 3; // 0=rojo,1=amarillo,2=verde
-            intersecciones[inter_creadas_local].id_i = inter_creadas_local;
-            intersecciones[inter_creadas_local].semaforos[0] = tempS;
-        } else {
-            int estado_primero = intersecciones[inter_creadas_local].semaforos[0].state;
-            if (estado_primero == 2 || estado_primero == 1)
-                tempS.state = 0;
-            else
-                tempS.state = (rand() % 2) + 1;
-            intersecciones[inter_creadas_local].semaforos[1] = tempS;
-        }
+        Semaphore s1 = {.id_s = idx * 2 + 1, .timer = 0};
+        if (s0.state == 2 || s0.state == 1)
+            s1.state = 0;
+        else
+            s1.state = (rand() % 2) + 1;
+        intersecciones[idx].semaforos[1] = s1;
     }
 
     // Inicializar vehículos
